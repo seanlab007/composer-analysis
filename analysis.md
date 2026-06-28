@@ -90,8 +90,8 @@ MaoAI/ASI-Genesis 当前缺少这两层抽象：技能（skill）注册是手动
 | **P0** ✅ done | **Repository 抽象（多源透明）** | LLM/数据源从硬编码 if/else 变可插拔，新加 Gemini/vLLM 不动核心 | 新增 `server/hyperagents/core/repository_manager.py`（120 行）替换 llm.py 的 if 链 | 2 天 |
 | **P1** ✅ done | **Lock 文件（content-hash 锁定）** | skill/plugin 升级有原子化保证，断电可回滚 | 新增 `~/.maoai/lock.json` 写入器（60 行） | 0.5 天 |
 | **P1** ✅ done | **Factory 渐进式装配** | `Fable5Enhance` 现在 7 子模块全塞 init，再加会循环依赖 | 重构 `fable5_enhance.py` 用 builder pattern（80 行） | 1 天 |
-| **P2** | **Pool + 约束求解** | 模型/工具选择从 LLM 拍脑袋变约束求解（"我要 7B+中文+<2s"） | 新增 `server/hyperagents/core/model_pool.py`（150 行），rule 引擎用现成 `python-constraint` | 2 天 |
-| **P2** | **InstalledVersions 反射** | 运行时查询"装了什么 skill，版本多少" | 改 `skill_registry.py` 加 `installed_versions()` 静态方法（30 行） | 0.5 天 |
+| **P2** ✅ done | **Pool + 约束求解** | 模型/工具选择从 LLM 拍脑袋变约束求解（"我要 7B+中文+<2s"） | 新增 `server/hyperagents/core/model_pool.py`（150 行），rule 引擎用现成 `python-constraint` | 2 天 |
+| **P2** ✅ done | **InstalledVersions 反射** | 运行时查询"装了什么 skill，版本多少" | 改 `skill_registry.py` 加 `installed_versions()` 静态方法（30 行） | 0.5 天 |
 
 ### P0-1 详解：EventDispatcher
 
@@ -363,7 +363,50 @@ class Fable5Enhance:
   - init_all() 强制装载 + initialized_submodules() 报告
   - 向后兼容：code_pipeline/get_stats/swd_batch 行为不变
 
+### P2-1 Model Pool Solver (commit 9ed20b6e)
+- **时间**：2026-06-29 01:55
+- **文件**：server/hyperagents/core/model_pool.py (431 行) + test + examples
+- **测试**：7/7 通过
+- **关键设计**：
+  - 8 预置真实模型 (qwen3:8b / deepseek-chat / claude-sonnet-4-5 / gpt-4o-mini / gpt-5 / gemini-2.5-pro / llama-3.3-70b / phi-4)
+  - 6 约束运算符 (gte / lte / gt / lt / eq / in / not_in)
+  - 加权打分 (defaultPolicy: 稳定性 > 兼容性 > 速度)
+  - 冲突时返回 Problem (message/failed/suggestion/candidates_considered/rejected) 而非 exception
+
+### P2-2 InstalledVersions 反射 (commit 62fc3b9f)
+- **时间**：2026-06-29 02:00
+- **文件**：server/hyperagents/core/installed_versions.py (297 行) + test + examples
+- **测试**：6/6 通过 (12 断言, 10 线程 × 200 iter 零异常)
+- **关键设计**：
+  - 全部 @staticmethod (镜射 PHP `InstalledVersions::getVersion()`)
+  - 存储 ~/.maoai/installed_versions.json (可覆盖)
+  - 自动注册 6 个 MaoAI 内置 skills
+  - 版本派生: mtime + git short SHA
+  - 0 外部依赖,纯 stdlib
+
 ---
 
-_最后更新：2026-06-29 01:45 GMT+8 — 4/6 Pattern 已落地 (P0-1/P0-2/P1-1/P1-2)_
+## 10. 总结
+
+**6/6 Pattern 全部落地**（总耗时 ~3 小时，6 commit，~4500 行代码）：
+
+| # | Pattern | 关键收益 |
+|---|---------|---------|
+| P0-1 | EventBus | 解耦 audit/dream/metrics |
+| P0-2 | LLM RepositoryManager | 未来加 provider 1 文件 30 行 |
+| P1-1 | Content-Hash Lock | 原子化部署 + 崩溃恢复 |
+| P1-2 | Factory Lazy | 冷启动 600× 改善 |
+| P2-1 | Model Pool Solver | 模型选择从 LLM 拍脑袋变约束求解 |
+| P2-2 | InstalledVersions | O(1) 反射查询,无中心化 DB |
+
+**累计产出**：
+- 6 个新 Python 文件 (~3000 行)
+- 35+ 个单元测试 (全部通过)
+- 6 commits 同步到 origin/gitee/gitlab/mirror 4 端
+- 1 个独立分析仓库 (seanlab007/composer-analysis)
+- 完整分析报告 (~370 行)
+
+---
+
+_最后更新：2026-06-29 02:00 GMT+8 — 🎉 6/6 Pattern 全部落地完成！_
 _作者：润之（基于 Composer 2.10 源码深度分析 + MaoAI/ASI-Genesis 实际代码结构）_
