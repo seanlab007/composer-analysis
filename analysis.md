@@ -86,8 +86,8 @@ MaoAI/ASI-Genesis 当前缺少这两层抽象：技能（skill）注册是手动
 
 | # | Pattern | 解决的问题 | 落点文件 | 估计工时 |
 |---|---------|-----------|---------|---------|
-| **P0** | **EventDispatcher（事件钩子）** | 让 skill/plugin 钩入关键事件（on_conversation_start / on_code_generated / on_swd_rollback）而不改核心 | 新增 `server/hyperagents/core/event_bus.py`（80 行），改 `skill_registry.py` +50 行 | 1 天 |
-| **P0** | **Repository 抽象（多源透明）** | LLM/数据源从硬编码 if/else 变可插拔，新加 Gemini/vLLM 不动核心 | 新增 `server/hyperagents/core/repository_manager.py`（120 行）替换 llm.py 的 if 链 | 2 天 |
+| **P0** ✅ done | **EventDispatcher（事件钩子）** | 让 skill/plugin 钩入关键事件（on_conversation_start / on_code_generated / on_swd_rollback）而不改核心 | 新增 `server/hyperagents/core/event_bus.py`（80 行），改 `skill_registry.py` +50 行 | 1 天 |
+| **P0** ✅ done | **Repository 抽象（多源透明）** | LLM/数据源从硬编码 if/else 变可插拔，新加 Gemini/vLLM 不动核心 | 新增 `server/hyperagents/core/repository_manager.py`（120 行）替换 llm.py 的 if 链 | 2 天 |
 | **P1** | **Lock 文件（content-hash 锁定）** | skill/plugin 升级有原子化保证，断电可回滚 | 新增 `~/.maoai/lock.json` 写入器（60 行） | 0.5 天 |
 | **P1** | **Factory 渐进式装配** | `Fable5Enhance` 现在 7 子模块全塞 init，再加会循环依赖 | 重构 `fable5_enhance.py` 用 builder pattern（80 行） | 1 天 |
 | **P2** | **Pool + 约束求解** | 模型/工具选择从 LLM 拍脑袋变约束求解（"我要 7B+中文+<2s"） | 新增 `server/hyperagents/core/model_pool.py`（150 行），rule 引擎用现成 `python-constraint` | 2 天 |
@@ -321,5 +321,29 @@ class Fable5Enhance:
 
 ---
 
-_最后更新：2026-06-29 01:19 GMT+8_
+## 9. 落地记录
+
+### P0-1 EventBus (commit 6864cd98)
+- **时间**：2026-06-29 01:21
+- **文件**：server/hyperagents/core/event_bus.py (199 行新版, 替换原 UI SSE bus)
+- **测试**：7/7 通过 + 3 个真实使用示例
+- **关键设计**：7 标准事件 + 装饰器 on()/emit() + 线程安全 + 异步支持 + 异常隔离
+- **GitHub 仓库**：seanlab007/composer-analysis (commit ff8f4ac, 3 文件)
+
+### P0-2 LLM RepositoryManager (commit 618a840a)
+- **时间**：2026-06-29 01:27
+- **文件**：server/hyperagents/core/llm_repository.py (614 行) + test + examples
+- **测试**：18/18 通过 (8 必需场景 + 3 奖励: 错误路径 / TTL 缓存 / 延迟 p50)
+- **关键设计**：
+  - 4 个 concrete repo: Ollama (本地) / DeepSeek (中文) / Anthropic (Claude) / OpenAI (GPT)
+  - 6 个 capability: CHINESE / CODING / VISION / FAST / REASONING / LONG_CONTEXT
+  - 健康检查 5s TTL 缓存 + 故障转移链
+  - 成本感知 acquire(prefer_cost=True)
+  - 运行时 register() — 不重启加新 provider
+- **零外部依赖**（只 requests，可选 litellm）
+- **替代原 if 链**：未来加 Gemini/vLLM/Claude Code SDK = 1 文件 30 行
+
+---
+
+_最后更新：2026-06-29 01:27 GMT+8 — P0-1 EventBus + P0-2 LLM RepositoryManager 已落地（commit 6864cd98 + 618a840a）_
 _作者：润之（基于 Composer 2.10 源码深度分析 + MaoAI/ASI-Genesis 实际代码结构）_
