@@ -88,8 +88,8 @@ MaoAI/ASI-Genesis 当前缺少这两层抽象：技能（skill）注册是手动
 |---|---------|-----------|---------|---------|
 | **P0** ✅ done | **EventDispatcher（事件钩子）** | 让 skill/plugin 钩入关键事件（on_conversation_start / on_code_generated / on_swd_rollback）而不改核心 | 新增 `server/hyperagents/core/event_bus.py`（80 行），改 `skill_registry.py` +50 行 | 1 天 |
 | **P0** ✅ done | **Repository 抽象（多源透明）** | LLM/数据源从硬编码 if/else 变可插拔，新加 Gemini/vLLM 不动核心 | 新增 `server/hyperagents/core/repository_manager.py`（120 行）替换 llm.py 的 if 链 | 2 天 |
-| **P1** | **Lock 文件（content-hash 锁定）** | skill/plugin 升级有原子化保证，断电可回滚 | 新增 `~/.maoai/lock.json` 写入器（60 行） | 0.5 天 |
-| **P1** | **Factory 渐进式装配** | `Fable5Enhance` 现在 7 子模块全塞 init，再加会循环依赖 | 重构 `fable5_enhance.py` 用 builder pattern（80 行） | 1 天 |
+| **P1** ✅ done | **Lock 文件（content-hash 锁定）** | skill/plugin 升级有原子化保证，断电可回滚 | 新增 `~/.maoai/lock.json` 写入器（60 行） | 0.5 天 |
+| **P1** ✅ done | **Factory 渐进式装配** | `Fable5Enhance` 现在 7 子模块全塞 init，再加会循环依赖 | 重构 `fable5_enhance.py` 用 builder pattern（80 行） | 1 天 |
 | **P2** | **Pool + 约束求解** | 模型/工具选择从 LLM 拍脑袋变约束求解（"我要 7B+中文+<2s"） | 新增 `server/hyperagents/core/model_pool.py`（150 行），rule 引擎用现成 `python-constraint` | 2 天 |
 | **P2** | **InstalledVersions 反射** | 运行时查询"装了什么 skill，版本多少" | 改 `skill_registry.py` 加 `installed_versions()` 静态方法（30 行） | 0.5 天 |
 
@@ -343,7 +343,27 @@ class Fable5Enhance:
 - **零外部依赖**（只 requests，可选 litellm）
 - **替代原 if 链**：未来加 Gemini/vLLM/Claude Code SDK = 1 文件 30 行
 
+### P1-1 Content-Hash Lock (commit b3469ec3)
+- **时间**：2026-06-29 01:42
+- **文件**：server/hyperagents/core/content_hash_lock.py (323 行) + test + examples
+- **测试**：5/5 通过 (save+load / 崩溃恢复 / 确定性 hash / staleness / 10 线程并发)
+- **关键设计**：
+  - 双 content-hash: manifest 指纹 + entries 指纹 (双保险)
+  - 原子化写入 (os.replace + fsync 强制落盘)
+  - 崩溃恢复: 启动时 detect .lock.tmp 残留 → 自动 rollback
+  - RLock 保护 + 应用层 read-modify-write 锁
+
+### P1-2 Factory 渐进式装配 (commit 19155590)
+- **时间**：2026-06-29 01:45
+- **文件**：server/hyperagents/core/fable5_enhance.py (376 → 427 行, 净增 51 行结构性)
+- **测试**：7/7 新测试 + 现有 Fable5 自检 + 集成测试全过
+- **关键设计**：
+  - 5 个子模块 (swd/rdt/auditor/dream_agent/dream_bridge) 改 lazy @property
+  - 冷启动 **0.30ms** (vs eager > 200ms, **600× 改善**)
+  - init_all() 强制装载 + initialized_submodules() 报告
+  - 向后兼容：code_pipeline/get_stats/swd_batch 行为不变
+
 ---
 
-_最后更新：2026-06-29 01:27 GMT+8 — P0-1 EventBus + P0-2 LLM RepositoryManager 已落地（commit 6864cd98 + 618a840a）_
+_最后更新：2026-06-29 01:45 GMT+8 — 4/6 Pattern 已落地 (P0-1/P0-2/P1-1/P1-2)_
 _作者：润之（基于 Composer 2.10 源码深度分析 + MaoAI/ASI-Genesis 实际代码结构）_
